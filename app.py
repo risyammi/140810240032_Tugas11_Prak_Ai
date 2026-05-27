@@ -2,9 +2,10 @@ import streamlit as st
 import numpy as np
 from PIL import Image
 from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-import io
+import matplotlib.patheffects as pe
 
 # ─────────────────────────────────────────
 #  PAGE CONFIG
@@ -28,7 +29,6 @@ st.markdown("""
     color: #f0ede8;
   }
 
-  /* ── Hero header ── */
   .hero {
     text-align: center;
     padding: 3rem 1rem 1.5rem;
@@ -50,7 +50,6 @@ st.markdown("""
     font-weight: 300;
   }
 
-  /* ── Upload area ── */
   [data-testid="stFileUploader"] {
     background: #1a1a1f;
     border: 1.5px dashed #333;
@@ -58,11 +57,8 @@ st.markdown("""
     padding: 1.5rem;
     transition: border-color 0.2s;
   }
-  [data-testid="stFileUploader"]:hover {
-    border-color: #ff6b6b;
-  }
+  [data-testid="stFileUploader"]:hover { border-color: #ff6b6b; }
 
-  /* ── Swatch cards ── */
   .swatch-card {
     background: #1a1a1f;
     border-radius: 16px;
@@ -71,35 +67,13 @@ st.markdown("""
     margin-bottom: 1rem;
     transition: transform 0.2s;
   }
-  .swatch-card:hover {
-    transform: translateY(-3px);
-  }
-  .swatch-block {
-    height: 90px;
-    width: 100%;
-  }
-  .swatch-info {
-    padding: 0.75rem;
-    text-align: center;
-  }
-  .swatch-hex {
-    font-family: 'Syne', sans-serif;
-    font-size: 0.9rem;
-    font-weight: 700;
-    letter-spacing: 1px;
-  }
-  .swatch-rgb {
-    font-size: 0.72rem;
-    color: #666;
-    margin-top: 2px;
-  }
-  .swatch-pct {
-    font-size: 0.75rem;
-    color: #aaa;
-    margin-top: 4px;
-  }
+  .swatch-card:hover { transform: translateY(-3px); }
+  .swatch-block { height: 90px; width: 100%; }
+  .swatch-info { padding: 0.75rem; text-align: center; }
+  .swatch-hex { font-family: 'Syne', sans-serif; font-size: 0.9rem; font-weight: 700; letter-spacing: 1px; }
+  .swatch-rgb { font-size: 0.72rem; color: #666; margin-top: 2px; }
+  .swatch-pct { font-size: 0.75rem; color: #aaa; margin-top: 4px; }
 
-  /* ── Section label ── */
   .section-label {
     font-family: 'Syne', sans-serif;
     font-size: 0.7rem;
@@ -111,7 +85,6 @@ st.markdown("""
     margin-bottom: 0.75rem;
   }
 
-  /* ── K-Means detail box ── */
   .kmeans-box {
     background: #1a1a1f;
     border-radius: 16px;
@@ -119,27 +92,11 @@ st.markdown("""
     margin-bottom: 0.75rem;
     border-left: 3px solid;
   }
-  .kmeans-iter {
-    font-size: 0.8rem;
-    color: #666;
-  }
+  .kmeans-iter { font-size: 0.8rem; color: #666; }
 
-  /* ── Progress bar override ── */
-  [data-testid="stProgressBar"] > div > div {
-    background: linear-gradient(90deg, #ff6b6b, #ffd93d) !important;
-    border-radius: 99px;
-  }
-
-  /* ── Slider ── */
-  [data-testid="stSlider"] {
-    padding-top: 0.25rem;
-  }
-
-  /* ── Hide Streamlit branding ── */
   #MainMenu, footer { visibility: hidden; }
   header { visibility: hidden; }
 
-  /* ── Scrollbar ── */
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: #0f0f11; }
   ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
@@ -155,26 +112,18 @@ def rgb_to_hex(rgb):
 
 
 def get_text_color(bg_rgb):
-    """Return black or white depending on background luminance."""
     r, g, b = [x / 255.0 for x in bg_rgb]
     luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
     return "#0f0f11" if luminance > 0.45 else "#f0ede8"
 
 
 def extract_colors(image: Image.Image, n_colors: int = 5):
-    """
-    Run K-Means on the image pixels and return:
-        colors       – (n_colors, 3) array of RGB centroids
-        percentages  – proportion of pixels per cluster (%)
-        kmeans       – fitted KMeans object (for metadata)
-    """
-    # Resize for speed; preserves colour distribution well enough
     img = image.convert("RGB").resize((200, 200), Image.LANCZOS)
     pixels = np.array(img).reshape(-1, 3).astype(np.float32)
 
     kmeans = KMeans(
         n_clusters=n_colors,
-        init="k-means++",   # smarter centroid init
+        init="k-means++",
         n_init=10,
         max_iter=300,
         random_state=42,
@@ -185,43 +134,29 @@ def extract_colors(image: Image.Image, n_colors: int = 5):
     counts = np.bincount(labels, minlength=n_colors)
     percentages = counts / len(labels) * 100
 
-    # Sort dominant → least dominant
     order = np.argsort(percentages)[::-1]
     colors = kmeans.cluster_centers_[order].astype(int)
     percentages = percentages[order]
+    # remap labels to new order
+    label_map = {old: new for new, old in enumerate(order)}
+    mapped_labels = np.array([label_map[l] for l in labels])
 
-    return colors, percentages, kmeans
+    return colors, percentages, kmeans, pixels, mapped_labels
 
 
 def make_palette_figure(colors, percentages):
-    """
-    Horizontal stacked bar — widths proportional to dominance.
-    Returns a matplotlib Figure.
-    """
     fig, ax = plt.subplots(figsize=(10, 1.6))
     fig.patch.set_facecolor("#0f0f11")
     ax.set_facecolor("#0f0f11")
 
     left = 0.0
     for color, pct in zip(colors, percentages):
-        ax.barh(
-            0,
-            pct,
-            left=left,
-            height=1,
-            color=np.array(color) / 255,
-        )
-        # Label inside bar if wide enough
+        ax.barh(0, pct, left=left, height=1, color=np.array(color) / 255)
         if pct > 8:
             ax.text(
-                left + pct / 2,
-                0,
-                f"{pct:.1f}%",
-                ha="center",
-                va="center",
-                fontsize=9,
-                color=get_text_color(color),
-                fontweight="bold",
+                left + pct / 2, 0, f"{pct:.1f}%",
+                ha="center", va="center", fontsize=9,
+                color=get_text_color(color), fontweight="bold",
             )
         left += pct
 
@@ -229,6 +164,113 @@ def make_palette_figure(colors, percentages):
     ax.set_ylim(-0.5, 0.5)
     ax.axis("off")
     plt.tight_layout(pad=0)
+    return fig
+
+
+def make_elbow_figure(pixels, max_k=10):
+    """Compute inertia for K=1..max_k and plot the elbow curve."""
+    inertias = []
+    k_range = range(1, max_k + 1)
+    for k in k_range:
+        km = KMeans(n_clusters=k, init="k-means++", n_init=5,
+                    max_iter=100, random_state=42)
+        km.fit(pixels)
+        inertias.append(km.inertia_)
+
+    fig, ax = plt.subplots(figsize=(7, 3.5))
+    fig.patch.set_facecolor("#1a1a1f")
+    ax.set_facecolor("#1a1a1f")
+
+    # Shaded area under curve
+    ax.fill_between(list(k_range), inertias, alpha=0.12, color="#4d96ff")
+
+    # Main line
+    ax.plot(list(k_range), inertias, color="#4d96ff", linewidth=2.5,
+            marker="o", markersize=7, markerfacecolor="#ffd93d",
+            markeredgecolor="#0f0f11", markeredgewidth=1.5)
+
+    # Annotate each point
+    for k, inertia in zip(k_range, inertias):
+        ax.annotate(
+            f"K={k}",
+            xy=(k, inertia),
+            xytext=(0, 12),
+            textcoords="offset points",
+            ha="center",
+            fontsize=7,
+            color="#888",
+        )
+
+    ax.set_xlabel("Jumlah Cluster (K)", color="#aaa", fontsize=10)
+    ax.set_ylabel("Inertia (WCSS)", color="#aaa", fontsize=10)
+    ax.set_title("Elbow Method — Optimal K", color="#f0ede8",
+                 fontsize=12, fontweight="bold", pad=12)
+    ax.tick_params(colors="#666")
+    ax.spines[["top", "right"]].set_visible(False)
+    for spine in ["bottom", "left"]:
+        ax.spines[spine].set_color("#333")
+    ax.set_xticks(list(k_range))
+    ax.grid(axis="y", color="#222", linewidth=0.8)
+
+    plt.tight_layout()
+    return fig
+
+
+def make_scatter_figure(pixels, colors, labels, n_colors):
+    """
+    2-D PCA scatter of pixel clusters — mirrors the K-Means scatter
+    plot from the lecture slides (halaman 6–7).
+    Samples a subset of pixels for speed.
+    """
+    # Sample max 3000 pixels so rendering is fast
+    rng = np.random.default_rng(0)
+    idx = rng.choice(len(pixels), size=min(3000, len(pixels)), replace=False)
+    sample_px = pixels[idx]
+    sample_lb = labels[idx]
+
+    # PCA → 2D
+    pca = PCA(n_components=2, random_state=42)
+    reduced = pca.fit_transform(sample_px)
+    centroids_2d = pca.transform(colors.astype(np.float32))
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    fig.patch.set_facecolor("#1a1a1f")
+    ax.set_facecolor("#1a1a1f")
+
+    for i in range(n_colors):
+        mask = sample_lb == i
+        cluster_color = np.array(colors[i]) / 255
+        ax.scatter(
+            reduced[mask, 0], reduced[mask, 1],
+            c=[cluster_color],
+            s=8, alpha=0.55, linewidths=0,
+        )
+
+    # Draw centroids as big stars
+    for i, (cx, cy) in enumerate(centroids_2d):
+        cluster_color = np.array(colors[i]) / 255
+        hex_c = rgb_to_hex(colors[i])
+        ax.scatter(cx, cy, s=220, c=[cluster_color],
+                   marker="*", edgecolors="#0f0f11", linewidths=1.2, zorder=5)
+        ax.annotate(
+            f" C{i+1}\n {hex_c.upper()}",
+            xy=(cx, cy), fontsize=7, color="#ddd",
+            fontweight="bold", zorder=6,
+        )
+
+    ax.set_title(
+        "Scatter Plot Cluster (PCA 2D)",
+        color="#f0ede8", fontsize=12, fontweight="bold", pad=10,
+    )
+    ax.set_xlabel("Principal Component 1", color="#666", fontsize=9)
+    ax.set_ylabel("Principal Component 2", color="#666", fontsize=9)
+    ax.tick_params(colors="#444")
+    ax.spines[["top", "right"]].set_visible(False)
+    for spine in ["bottom", "left"]:
+        ax.spines[spine].set_color("#333")
+    ax.grid(color="#222", linewidth=0.6)
+
+    plt.tight_layout()
     return fig
 
 
@@ -264,13 +306,11 @@ with col_k:
 if uploaded_file is not None:
     image = Image.open(uploaded_file).convert("RGB")
 
-    # ── Image preview
     st.markdown('<div class="section-label">Gambar Input</div>', unsafe_allow_html=True)
     st.image(image, use_column_width=True)
 
-    # ── Run K-Means
     with st.spinner("⚙️  Menjalankan K-Means Clustering…"):
-        colors, percentages, kmeans = extract_colors(image, n_colors)
+        colors, percentages, kmeans, pixels, labels = extract_colors(image, n_colors)
 
     # ── Palette bar
     st.markdown('<div class="section-label">Palet Warna Dominan</div>', unsafe_allow_html=True)
@@ -282,7 +322,6 @@ if uploaded_file is not None:
     swatch_cols = st.columns(n_colors)
     for i, (col, pct) in enumerate(zip(colors, percentages)):
         hex_val = rgb_to_hex(col)
-        txt_col = get_text_color(col)
         with swatch_cols[i]:
             st.markdown(f"""
             <div class="swatch-card">
@@ -294,6 +333,29 @@ if uploaded_file is not None:
               </div>
             </div>
             """, unsafe_allow_html=True)
+
+    # ════════════════════════════════════════
+    #  VISUALISASI K-MEANS (NEW!)
+    # ════════════════════════════════════════
+    st.markdown('<div class="section-label">Visualisasi K-Means</div>', unsafe_allow_html=True)
+
+    viz_col1, viz_col2 = st.columns(2, gap="medium")
+
+    with viz_col1:
+        st.markdown("**📈 Elbow Method**")
+        st.caption("Grafik inertia vs K untuk menemukan jumlah cluster optimal (seperti di materi hal. 9)")
+        with st.spinner("Menghitung elbow curve…"):
+            fig_elbow = make_elbow_figure(pixels, max_k=10)
+        st.pyplot(fig_elbow, use_container_width=True)
+        plt.close(fig_elbow)
+
+    with viz_col2:
+        st.markdown("**🔵 Scatter Plot Cluster**")
+        st.caption("Visualisasi 2D tiap piksel dalam cluster-nya (PCA projection)")
+        with st.spinner("Membuat scatter plot…"):
+            fig_scatter = make_scatter_figure(pixels, colors, labels, n_colors)
+        st.pyplot(fig_scatter, use_container_width=True)
+        plt.close(fig_scatter)
 
     # ── K-Means Detail
     st.markdown('<div class="section-label">Detail Proses K-Means</div>', unsafe_allow_html=True)
@@ -308,9 +370,6 @@ if uploaded_file is not None:
 
     for i, (col, pct) in enumerate(zip(colors, percentages)):
         hex_val = rgb_to_hex(col)
-        border_col = hex_val
-
-        # progress bar width
         bar_html = f"""
         <div class="kmeans-box" style="border-left-color:{hex_val}">
           <div style="display:flex; align-items:center; gap:12px; margin-bottom:6px;">
@@ -331,16 +390,7 @@ if uploaded_file is not None:
         """
         st.markdown(bar_html, unsafe_allow_html=True)
 
-    # ── Elbow hint
-    st.markdown('<div class="section-label">Tips: Elbow Method</div>', unsafe_allow_html=True)
-    st.info(
-        f"Kamu memilih **K = {n_colors}**. "
-        "Coba geser slider ke kiri/kanan — perhatikan bagaimana warna berubah. "
-        "Nilai K optimal biasanya ada di 'siku' grafik inertia vs K (elbow point)."
-    )
-
 else:
-    # ── Empty state
     st.markdown("""
     <div style="text-align:center; padding: 3rem 0; color:#333;">
       <div style="font-size:4rem;">🖼️</div>
