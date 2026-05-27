@@ -11,7 +11,7 @@ import matplotlib.patheffects as pe
 #  PAGE CONFIG
 # ─────────────────────────────────────────
 st.set_page_config(
-    page_title="ChromaLens · Color Palette Extractor",
+    page_title="RisyamLens · Warna Palet Ekstraktor",
     page_icon="🎨",
     layout="centered",
 )
@@ -279,7 +279,7 @@ def make_scatter_figure(pixels, colors, labels, n_colors):
 # ─────────────────────────────────────────
 st.markdown("""
 <div class="hero">
-  <h1>ChromaLens</h1>
+  <h1>RisyamLens</h1>
   <p>Upload an image · K-Means extracts your dominant colors</p>
 </div>
 """, unsafe_allow_html=True)
